@@ -78,6 +78,10 @@ password      Password for that account
 token         Leave blank — populated automatically after sign-in
 ============  =======================================================
 
+The ``POST /auth/signup`` request auto-populates ``signup_username``,
+``signup_password``, and ``signup_email`` in a pre-request script, so you do
+not need to create them manually.
+
 
 Per-request Postman tests
 -------------------------
@@ -103,7 +107,7 @@ All other routes produce a Postman request item with sensible defaults. Sample
 request bodies and query parameters are provided for the following endpoints:
 
 * ``POST /auth/signin`` — ``{"username": "{{username}}", "password": "{{password}}"}"
-* ``POST /auth/signup`` — ``{"username", "email", "password"}``
+* ``POST /auth/signup`` — auto-populated ``signup_*`` variables for a fresh user
 * ``POST /bugs``        — ``{"url", "description", "status"}``
 * ``GET  /bugs``        — ``?page=1&per_page=20``
 * ``GET  /bugs/search`` — ``?q=sql+injection&limit=10``
@@ -137,7 +141,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAIN_FILE = PROJECT_ROOT / "src" / "main.py"
 DEFAULT_OUTPUT = PROJECT_ROOT / "blt_api_postman_collection.json"
 LOGIN_ENDPOINT_ID = "post_auth_signin"
+SIGNUP_ENDPOINT_ID = "post_auth_signup"
 DEFAULT_RESPONSE_TIME_MS = 5000
+SIGNUP_USERNAME_VARIABLE = "signup_username"
+SIGNUP_PASSWORD_VARIABLE = "signup_password"
+SIGNUP_EMAIL_VARIABLE = "signup_email"
 
 
 @dataclass(frozen=True)
@@ -173,9 +181,9 @@ BODY_SAMPLES = {
         "password": "{{password}}",
     },
     ("POST", "/auth/signup"): {
-        "username": "{{username}}",
-        "email": "{{username}}@example.com",
-        "password": "{{password}}",
+        "username": f"{{{{{SIGNUP_USERNAME_VARIABLE}}}}}",
+        "email": f"{{{{{SIGNUP_EMAIL_VARIABLE}}}}}",
+        "password": f"{{{{{SIGNUP_PASSWORD_VARIABLE}}}}}",
     },
     ("POST", "/bugs"): {
         "url": "https://example.com/vulnerability",
@@ -317,6 +325,37 @@ def build_postman_tests(endpoint: EndpointDefinition, response_time_ms: int) -> 
     return "\n".join(lines)
 
 
+def build_prerequest_script(endpoint: EndpointDefinition) -> str | None:
+    if endpoint.endpoint_id != SIGNUP_ENDPOINT_ID:
+        return None
+
+    return "\n".join(
+        [
+            'const baseUsername = pm.environment.get("username");',
+            'const basePassword = pm.environment.get("password");',
+            '',
+            'pm.test("Signup source credentials are configured", function () {',
+            '    pm.expect(baseUsername).to.be.a("string").and.not.empty;',
+            '    pm.expect(basePassword).to.be.a("string").and.not.empty;',
+            '});',
+            '',
+            'const signupRunId = Date.now().toString();',
+            (
+                f'pm.collectionVariables.set("{SIGNUP_USERNAME_VARIABLE}", '
+                '`${baseUsername}_signup_${signupRunId}`);'
+            ),
+            (
+                f'pm.collectionVariables.set("{SIGNUP_PASSWORD_VARIABLE}", '
+                '`${basePassword}_signup`);'
+            ),
+            (
+                f'pm.collectionVariables.set("{SIGNUP_EMAIL_VARIABLE}", '
+                '`${baseUsername}_signup_${signupRunId}@example.com`);'
+            ),
+        ]
+    )
+
+
 def build_url(endpoint: EndpointDefinition) -> str:
     path = substitute_path_params(endpoint.path)
     raw_url = f"{{{{base_url}}}}{path}"
@@ -347,17 +386,32 @@ def build_request_item(endpoint: EndpointDefinition, response_time_ms: int) -> d
             "options": {"raw": {"language": "json"}},
         }
 
-    return {
-        "name": endpoint.display_name,
-        "event": [
+    events = []
+    prerequest_script = build_prerequest_script(endpoint)
+    if prerequest_script is not None:
+        events.append(
             {
-                "listen": "test",
+                "listen": "prerequest",
                 "script": {
                     "type": "text/javascript",
-                    "exec": build_postman_tests(endpoint, response_time_ms).splitlines(),
+                    "exec": prerequest_script.splitlines(),
                 },
             }
-        ],
+        )
+
+    events.append(
+        {
+            "listen": "test",
+            "script": {
+                "type": "text/javascript",
+                "exec": build_postman_tests(endpoint, response_time_ms).splitlines(),
+            },
+        }
+    )
+
+    return {
+        "name": endpoint.display_name,
+        "event": events,
         "request": request,
         "response": [],
     }
@@ -385,6 +439,10 @@ def build_collection(
             "- username",
             "- password",
             "- token",
+            (
+                f"The signup request auto-populates {SIGNUP_USERNAME_VARIABLE}, "
+                f"{SIGNUP_PASSWORD_VARIABLE}, and {SIGNUP_EMAIL_VARIABLE} in a pre-request script."
+            ),
             f"The first request is {LOGIN_ENDPOINT_ID} and stores the JWT in pm.environment.set(\"token\", value).",
         ]
     )

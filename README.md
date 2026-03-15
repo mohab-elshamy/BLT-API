@@ -585,6 +585,8 @@ python scripts/generate_postman_collection.py \
    | `password` | `s3cr3t` | Plain text |
    | `token` | *(leave blank)* | Auto-populated by the sign-in request |
 
+  The signup request auto-generates `signup_username`, `signup_password`, and `signup_email` in a pre-request script, so you do not need to set them manually.
+
 3. Select the environment and run the collection. The first request (`POST /auth/signin`) stores the JWT in `token`; every subsequent request sends `Authorization: Bearer {{token}}` automatically.
 
 #### Built-in tests
