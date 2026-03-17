@@ -250,45 +250,52 @@ def discover_routes(main_file: Path = MAIN_FILE) -> list[EndpointDefinition]:
     tree = ast.parse(main_file.read_text(), filename=str(main_file))
     routes: list[EndpointDefinition] = []
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Attribute):
-            continue
-        if node.func.attr != "add_route":
-            continue
-        if not isinstance(node.func.value, ast.Name) or node.func.value.id != "router":
-            continue
-        if len(node.args) < 3:
-            continue
+    def iter_nodes_in_source_order(node: ast.AST) -> Iterable[ast.AST]:
+        """Yield AST nodes via deterministic DFS while preserving source order."""
+        for child in ast.iter_child_nodes(node):
+            yield child
+            yield from iter_nodes_in_source_order(child)
 
-        method_node, path_node, handler_node = node.args[:3]
-        if not isinstance(method_node, ast.Constant) or not isinstance(method_node.value, str):
-            continue
-        if not isinstance(path_node, ast.Constant) or not isinstance(path_node.value, str):
-            continue
-        if not isinstance(handler_node, ast.Name):
-            continue
+    for statement in tree.body:
+        for node in iter_nodes_in_source_order(statement):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "add_route":
+                continue
+            if not isinstance(node.func.value, ast.Name) or node.func.value.id != "router":
+                continue
+            if len(node.args) < 3:
+                continue
 
-        method = method_node.value.upper()
-        path = path_node.value
-        handler = handler_node.id
+            method_node, path_node, handler_node = node.args[:3]
+            if not isinstance(method_node, ast.Constant) or not isinstance(method_node.value, str):
+                continue
+            if not isinstance(path_node, ast.Constant) or not isinstance(path_node.value, str):
+                continue
+            if not isinstance(handler_node, ast.Name):
+                continue
 
-        if path == "/" or handler == "handle_homepage":
-            continue
+            method = method_node.value.upper()
+            path = path_node.value
+            handler = handler_node.id
 
-        routes.append(
-            EndpointDefinition(
-                endpoint_id=build_endpoint_id(method, path),
-                method=method,
-                path=path,
-                handler=handler,
-                expected_status=EXPECTED_STATUS_OVERRIDES.get((method, path), 200),
-                folder=classify_folder(path),
-                query_params=QUERY_PARAM_SAMPLES.get((method, path), ()),
-                body=BODY_SAMPLES.get((method, path)),
+            if path == "/" or handler == "handle_homepage":
+                continue
+
+            routes.append(
+                EndpointDefinition(
+                    endpoint_id=build_endpoint_id(method, path),
+                    method=method,
+                    path=path,
+                    handler=handler,
+                    expected_status=EXPECTED_STATUS_OVERRIDES.get((method, path), 200),
+                    folder=classify_folder(path),
+                    query_params=QUERY_PARAM_SAMPLES.get((method, path), ()),
+                    body=BODY_SAMPLES.get((method, path)),
+                )
             )
-        )
 
     return routes
 
@@ -543,11 +550,11 @@ def build_collection(
     
     Discovers all routes, reorders with login first, generates request items,
     and wraps them in a collection with metadata and environment setup info.
-    
+
     Args:
         ordered_ids: Optional list of endpoint IDs to prioritize in collection order.
         response_time_ms: Response time threshold for generated test assertions.
-    
+
     Returns:
         Dict representing a Postman Collection v2.1 (info, item).
     """
@@ -582,19 +589,32 @@ def build_collection(
 
 def save_collection(output_path: Path, collection: dict[str, Any]) -> None:
     """Write the Postman collection to a JSON file.
-    
+
     Serializes the collection to JSON with 2-space indentation and creates
     parent directories if needed. Writes with UTF-8 encoding for portability.
-    
+
     Args:
         output_path: Path where the collection JSON will be written.
         collection: Postman collection dict to serialize.
-    
+
     Raises:
         OSError: If file write fails after directory creation.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(collection, indent=2) + "\n", encoding="utf-8")
+
+
+def positive_int(value: str) -> int:
+    """Parse a CLI integer argument and ensure it is strictly positive."""
+    try:
+        parsed_value = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Must be a positive integer") from exc
+
+    if parsed_value <= 0:
+        raise argparse.ArgumentTypeError("Must be a positive integer")
+
+    return parsed_value
 
 
 def parse_args() -> argparse.Namespace:
@@ -623,7 +643,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--response-time-ms",
-        type=int,
+        type=positive_int,
         default=DEFAULT_RESPONSE_TIME_MS,
         help="Maximum allowed response time for generated Postman tests.",
     )
