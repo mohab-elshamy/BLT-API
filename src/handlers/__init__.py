@@ -19,6 +19,7 @@ from .health import handle_health
 from .homepage import handle_homepage
 from .auth import handle_signup, handle_signin, handle_verify_email
 from .postman_collection import handle_postman_collection
+from .routes import make_routes_handler
 
 __all__ = [
     "handle_bugs",
@@ -37,4 +38,5 @@ __all__ = [
     "handle_signin",
     "handle_verify_email",
     "handle_postman_collection",
+    "make_routes_handler",
 ]

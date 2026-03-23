@@ -25,7 +25,7 @@ from handlers import (
     handle_hunts,
     handle_stats,
     handle_leaderboard,
-    handle_contributors,
+    handle_contributors, 
     handle_repos,
     handle_health,
     handle_homepage,
@@ -33,6 +33,7 @@ from handlers import (
     handle_signin,
     handle_verify_email,
     handle_postman_collection,
+    make_routes_handler
 )
 from utils import json_response, error_response, cors_headers
 from libs.db import get_db_safe 
@@ -114,6 +115,8 @@ router.add_route("GET", "/contributors/{id}", handle_contributors)
 router.add_route("GET", "/repos", handle_repos)
 router.add_route("GET", "/repos/{id}", handle_repos)
 
+# API Discoverability - uses factory pattern to avoid circular imports
+router.add_route("GET", "/routes", make_routes_handler(router))
 
 def _add_v2_route(method: str, pattern: str, handler) -> None:
     """Register a v2-prefixed route while preserving existing unversioned routes."""
@@ -177,6 +180,8 @@ _add_v2_route("GET", "/contributors/{id}", handle_contributors)
 
 _add_v2_route("GET", "/repos", handle_repos)
 _add_v2_route("GET", "/repos/{id}", handle_repos)
+# v2 API discoverability
+_add_v2_route("GET", "/routes", make_routes_handler(router))
 
 class Default(WorkerEntrypoint):
     async def on_fetch(self, request):
